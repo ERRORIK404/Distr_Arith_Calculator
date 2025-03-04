@@ -1,4 +1,4 @@
-package orchestratorapplication
+package orchestrator_application
 
 import (
 	"encoding/json"
@@ -116,37 +116,32 @@ func (n *ExprNode) EvaluateParallel() float64 {
 	}
 }
 
-
-// Функция для вылидации и полного подсчета выражения
-func Calc(expression string) (res float64, err error) {
-    // Удаляем пробелы из выражения
+func Validator(expression string) (*ExprNode, error) {
+	    // Удаляем пробелы из выражения
     expression = strings.ReplaceAll(expression, " ", "")
 
     // Проверка на пустоту
     if expression == "" {
-        return 0, locerr.ErrEmptyExpression
+        return nil, locerr.ErrEmptyExpression
     }
 
     // Проверка на правильность скобок
     if !conv.IsValidParentheses(expression) {
-        return 0,locerr.ErrIncorrectBracketPlacement
+        return nil,locerr.ErrIncorrectBracketPlacement
     }
 
     // Преобразование выражения в RPN
     rpn, err := conv.InfixToRPN(expression)
     if err != nil {
-        return 0, err
+        return nil, err
     }
 
-    // Преобразование обратной польской нотации в дерево
-    result, err := RpnToTree(rpn)
+	result, err := RpnToTree(rpn)
     if err != nil {
-        return 0, err
+        return nil, err
     }
-	// Вычисляем дерево
-    return result.EvaluateParallel(), nil
+	return result, nil
 }
-
 
 // Хендлер для получчения нового выражения
 func Accept_expression_handler(w http.ResponseWriter, r *http.Request) {
@@ -163,6 +158,16 @@ func Accept_expression_handler(w http.ResponseWriter, r *http.Request) {
 
 	expression.Expression = str.Message
 	expressionsMap.Write(expression)
+	result, err := Validator(expression.Expression)
+	if err != nil {
+		expression.Status = "error"
+		if err == locerr.ErrIncorrectBracketPlacement || err == locerr.ErrEmptyExpression{
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
 	w.WriteHeader(http.StatusCreated)
 	w.Header().Set("Content-Type", "application/json")
 	type id struct{Id int `json:"id"`}
@@ -170,17 +175,8 @@ func Accept_expression_handler(w http.ResponseWriter, r *http.Request) {
 
 	// Запускаем вычисление выражения в отдельном потоке
     go func(){
-        result, err := Calc(expression.Expression)
-        if err != nil {
-			expression.Status = "error"
-			if err == locerr.ErrIncorrectBracketPlacement || err == locerr.ErrEmptyExpression{
-				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
-			} else {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-			}
-            return
-        }
-		expression.Result = fmt.Sprintf("%f", result)
+		res := result.EvaluateParallel()
+		expression.Result = fmt.Sprintf("%f", res)
 		expression.Status = "success"
 		expressionsMap.Write(expression)
     }()
@@ -223,7 +219,6 @@ func Get_all_expressions_handler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
     w.Write(jsonData)
 	log.Println("Get all data from map")
-	log.Println(tasksMap)
 }
 
 //Хендре для получения выражения по его индентификатору
